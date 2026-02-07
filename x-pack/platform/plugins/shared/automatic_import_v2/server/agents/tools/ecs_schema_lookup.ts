@@ -375,6 +375,11 @@ const ECS_SCHEMA: Record<
     description: 'Full path to the file.',
     example: '/home/user/documents/document.pdf',
   },
+  'file.type': {
+    type: 'keyword',
+    description: 'File type (file, dir, symlink) or filesystem type (ext4, ntfs, apfs).',
+    example: 'file',
+  },
   'file.size': {
     type: 'long',
     description: 'File size in bytes.',
@@ -425,11 +430,47 @@ const ECS_SCHEMA: Record<
     example: 'ECONNREFUSED',
   },
 
+  // Rule fields (for logs referencing rules, policies, signatures)
+  'rule.name': {
+    type: 'keyword',
+    description:
+      'Name of the rule or signature generating the event (e.g., firewall rule, osquery pack query).',
+    example: 'block_suspicious_traffic',
+  },
+  'rule.id': {
+    type: 'keyword',
+    description: 'Unique identifier of the rule or signature.',
+    example: '12345',
+  },
+  'rule.category': {
+    type: 'keyword',
+    description: 'Category of the rule (e.g., compliance, security, network).',
+    example: 'security',
+  },
+  'rule.description': {
+    type: 'keyword',
+    description: 'Description of the rule or signature.',
+    example: 'Blocks traffic from known malicious IPs',
+  },
+  'rule.ruleset': {
+    type: 'keyword',
+    description: 'Name of the ruleset or pack containing this rule.',
+    example: 'it-compliance',
+  },
+
   // ECS metadata
   'ecs.version': {
     type: 'keyword',
     description: 'ECS version this event conforms to.',
     example: '8.11.0',
+  },
+
+  // Event created (ingest timestamp)
+  'event.created': {
+    type: 'date',
+    description:
+      'Timestamp when the event was created/ingested (distinct from @timestamp which is when the event occurred).',
+    example: '2024-01-10T12:00:00.000Z',
   },
 
   // Tags
@@ -527,7 +568,9 @@ export function ecsSchemaLookupTool(): DynamicStructuredTool {
       const resultContent =
         Object.keys(results).length > 0
           ? JSON.stringify(results, null, 2)
-          : `No ECS fields found matching "${query}"${category ? ` in category "${category}"` : ''}. Try a broader search or different category.`;
+          : `No ECS fields found matching "${query}"${
+              category ? ` in category "${category}"` : ''
+            }. Try a broader search or different category.`;
 
       return new Command({
         update: {

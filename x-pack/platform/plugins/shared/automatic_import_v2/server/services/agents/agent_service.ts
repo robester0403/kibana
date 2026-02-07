@@ -87,10 +87,11 @@ export class AgentService {
       <workflow>
         1. Call fetch_log_samples to retrieve 5-10 sample logs
         2. Use deep_extraction_analyzer to identify extractable patterns (IPs, users, timestamps, etc.)
-        3. Analyze the samples to identify format, fields, and characteristics
-        4. Provide structured analysis output as specified in your system prompt
+        3. Use ecs_schema_lookup to verify ECS field mappings for detected patterns (e.g., lookup "source.*" for source IPs, "event.*" for categorization)
+        4. Analyze the samples to identify format, fields, and characteristics
+        5. Provide structured analysis output as specified in your system prompt, including preliminary ECS field recommendations
       </workflow>`,
-      tools: [fetchSamplesToolInstance, extractionTool],
+      tools: [fetchSamplesToolInstance, extractionTool, ecsLookupTool],
     });
 
     const pipelineGeneratorSubAgent = createIngestPipelineGeneratorAgent({
@@ -123,10 +124,10 @@ export class AgentService {
     const langSmithTracers =
       langSmithOptions?.apiKey && langSmithOptions?.projectName
         ? getLangSmithTracer({
-          apiKey: langSmithOptions.apiKey,
-          projectName: langSmithOptions.projectName,
-          logger: this.logger,
-        })
+            apiKey: langSmithOptions.apiKey,
+            projectName: langSmithOptions.projectName,
+            logger: this.logger,
+          })
         : [];
 
     const result = await automaticImportAgent.invoke(

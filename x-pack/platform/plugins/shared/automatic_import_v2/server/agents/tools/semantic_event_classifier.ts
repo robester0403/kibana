@@ -121,10 +121,18 @@ const CLASSIFICATION_RULES: ClassificationRule[] = [
     confidence: 'high',
   },
   {
-    keywords: ['file deleted', 'file removed', 'delete file', 'remove file'],
+    keywords: ['file deleted', 'delete file'],
     category: ['file'],
     types: ['deletion'],
     confidence: 'high',
+  },
+  // Note: 'removed' alone often means state change (e.g., osquery row removed from results)
+  // Only classify as deletion when explicitly about file removal
+  {
+    keywords: ['file removed', 'remove file', 'unlink'],
+    category: ['file'],
+    types: ['deletion'],
+    confidence: 'medium',
   },
   {
     keywords: ['file modified', 'file changed', 'file updated', 'modify file'],
@@ -256,6 +264,15 @@ const CLASSIFICATION_RULES: ClassificationRule[] = [
     keywords: ['boot', 'startup', 'shutdown', 'reboot', 'restart', 'system start'],
     category: ['host'],
     types: ['start'],
+    confidence: 'high',
+  },
+
+  // State change events (generic - often osquery, inventory, config management)
+  // When action is just "added" or "removed" without file/user context, use info type
+  {
+    keywords: ['action=added', 'action=removed', 'action":"added', 'action":"removed'],
+    category: ['host'],
+    types: ['info'],
     confidence: 'high',
   },
 
@@ -417,9 +434,7 @@ function classifyMessage(message: string): ClassificationResult {
  */
 export function semanticEventClassifierTool(): DynamicStructuredTool {
   const schema = z.object({
-    messages: z
-      .array(z.string())
-      .describe('Array of log messages to classify'),
+    messages: z.array(z.string()).describe('Array of log messages to classify'),
     includeValidationInfo: z
       .boolean()
       .optional()
