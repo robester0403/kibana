@@ -18,6 +18,10 @@ import {
   fetchSamplesTool,
   fetchUniqueKeysTool,
   ingestPipelineValidatorTool,
+  ecsSchemaLookupTool,
+  deepExtractionAnalyzerTool,
+  relatedFieldsAggregatorTool,
+  semanticEventClassifierTool,
 } from '../../agents/tools';
 import type { AutomaticImportSamplesIndexService } from '../samples_index/index_service';
 import { INGEST_PIPELINE_GENERATOR_PROMPT } from '../../agents/prompts';
@@ -70,15 +74,23 @@ export class AgentService {
     const validatorTool = ingestPipelineValidatorTool(esClient, samples);
     const uniqueKeysTool = fetchUniqueKeysTool();
 
+    // Create enhanced tools for improved pipeline quality
+    // These tools work with ANY log format - no assumptions about vendor or structure
+    const ecsLookupTool = ecsSchemaLookupTool();
+    const extractionTool = deepExtractionAnalyzerTool();
+    const relatedTool = relatedFieldsAggregatorTool();
+    const classifierTool = semanticEventClassifierTool();
+
     // Create the sub agents with tools
     const logsAnalyzerSubAgent = createLogsAnalyzerAgent({
-      prompt: `You have access to the fetch_log_samples tool. Use it to retrieve log samples, then analyze the format and provide structured analysis for ingest pipeline generation.
+      prompt: `You have access to tools for analyzing log samples. Use them to retrieve and analyze log samples for ingest pipeline generation.
       <workflow>
         1. Call fetch_log_samples to retrieve 5-10 sample logs
-        2. Analyze the samples to identify format, fields, and characteristics
-        3. Provide structured analysis output as specified in your system prompt
+        2. Use deep_extraction_analyzer to identify extractable patterns (IPs, users, timestamps, etc.)
+        3. Analyze the samples to identify format, fields, and characteristics
+        4. Provide structured analysis output as specified in your system prompt
       </workflow>`,
-      tools: [fetchSamplesToolInstance],
+      tools: [fetchSamplesToolInstance, extractionTool],
     });
 
     const pipelineGeneratorSubAgent = createIngestPipelineGeneratorAgent({
@@ -86,14 +98,20 @@ export class AgentService {
       description:
         'Generates an Elasticsearch ingest pipeline for the provided log samples and documentation.',
       prompt: INGEST_PIPELINE_GENERATOR_PROMPT,
-      tools: [validatorTool],
+      tools: [validatorTool, ecsLookupTool],
       sampleCount: samples.length,
     });
 
     const textToEcsSubAgent = createTextToEcsAgent({
-      prompt:
-        'You may call tools as needed to inspect recent pipeline outputs and gather sample field values before proposing ECS mappings.',
-      tools: [uniqueKeysTool],
+      prompt: `You have access to tools for ECS mapping and field analysis.
+      <workflow>
+        1. Use fetch_unique_keys to inspect recent pipeline outputs
+        2. Use ecs_schema_lookup to find correct ECS field definitions
+        3. Use semantic_event_classifier to determine event.category/type values
+        4. Use related_fields_aggregator to ensure proper related.* field population
+        5. Propose comprehensive ECS mappings following the schema
+      </workflow>`,
+      tools: [uniqueKeysTool, ecsLookupTool, relatedTool, classifierTool],
     });
 
     // Create and invoke the agent
@@ -105,10 +123,10 @@ export class AgentService {
     const langSmithTracers =
       langSmithOptions?.apiKey && langSmithOptions?.projectName
         ? getLangSmithTracer({
-            apiKey: langSmithOptions.apiKey,
-            projectName: langSmithOptions.projectName,
-            logger: this.logger,
-          })
+          apiKey: langSmithOptions.apiKey,
+          projectName: langSmithOptions.projectName,
+          logger: this.logger,
+        })
         : [];
 
     const result = await automaticImportAgent.invoke(
