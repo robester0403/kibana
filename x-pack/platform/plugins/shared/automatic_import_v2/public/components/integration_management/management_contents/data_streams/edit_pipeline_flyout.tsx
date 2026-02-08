@@ -23,6 +23,8 @@ import {
   EuiToolTip,
   EuiLoadingSpinner,
   EuiCallOut,
+  EuiCopy,
+  EuiButtonEmpty,
 } from '@elastic/eui';
 import React, { useState, useMemo } from 'react';
 import type { DataStreamResponse } from '../../../../../common';
@@ -152,6 +154,11 @@ export const EditPipelineFlyout = ({
     },
   ];
 
+  const copyAllText = useMemo(
+    () => tableData.map((row) => `${row.field}: ${row.value}`).join('\n'),
+    [tableData]
+  );
+
   const search: EuiSearchBarProps = {
     box: {
       incremental: true,
@@ -211,14 +218,33 @@ export const EditPipelineFlyout = ({
         )}
 
         {!isLoading && !isError && selectedTab === 'table' && (
-          <EuiInMemoryTable
-            items={tableData}
-            columns={columns}
-            searchFormat="text"
-            search={search}
-            pagination
-            sorting
-          />
+          <>
+            <EuiFlexGroup justifyContent="flexEnd">
+              <EuiFlexItem grow={false}>
+                <EuiCopy textToCopy={copyAllText}>
+                  {(copy) => (
+                    <EuiButtonEmpty
+                      size="s"
+                      iconType="copyClipboard"
+                      onClick={copy}
+                      aria-label="Copy all fields"
+                    >
+                      Copy all fields
+                    </EuiButtonEmpty>
+                  )}
+                </EuiCopy>
+              </EuiFlexItem>
+            </EuiFlexGroup>
+            <EuiSpacer size="s" />
+            <EuiInMemoryTable
+              items={tableData}
+              columns={columns}
+              searchFormat="text"
+              search={search}
+              pagination
+              sorting
+            />
+          </>
         )}
 
         {!isLoading && !isError && selectedTab === 'pipeline' && data?.ingest_pipeline && (
