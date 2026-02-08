@@ -1,0 +1,7 @@
+{
+  "type": "functional-tests",
+  "id": "@kbn/evals-suite-automatic-import-v2",
+  "owner": "@elastic/security-scalability",
+  "group": "platform",
+  "visibility": "shared"
+}

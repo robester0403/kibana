@@ -34,6 +34,13 @@
       "configPath": "x-pack/solutions/observability/packages/kbn-evals-suite-obs-ai-assistant/ai_insights/playwright.config.ts",
       "tags": ["observability", "ai-assistant"],
       "ciLabels": ["evals:obs-ai-assistant-ai-insights"]
+    },
+    {
+      "id": "automatic-import-v2",
+      "name": "Automatic Import V2",
+      "configPath": "x-pack/platform/packages/shared/kbn-evals-suite-automatic-import-v2/playwright.config.ts",
+      "tags": ["platform", "automatic-import"],
+      "ciLabels": ["evals:automatic-import-v2"]
     }
   ]
 }
