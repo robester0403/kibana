@@ -46,7 +46,7 @@ When a user requests an ingest pipeline for an integration and datastream, orche
 
 ### Step 1: Analyze Log Format
 **Delegate to logs_analyzer sub-agent:**
-- Task: "Analyze the log format for integration [integration_id] and datastream [datastream_id]. Provide structured analysis including format type, field information, sample characteristics, and specific parsing strategy recommendations. Identify all fields present in the samples and note any syslog headers, structured formats (JSON, CSV, KV), or nested data."
+- Task: "Analyze the log format for integration [integration_id] and datastream [datastream_id]. Provide structured analysis including format type, field information, sample characteristics, and specific parsing strategy recommendations. Identify all fields present in the samples and note any syslog headers, structured formats (JSON, CSV, KV), or nested data. For syslog formats, specifically identify the priority, timestamp, hostname, process name, and PID positions."
 - Expected output: Structured markdown analysis with format details and parsing recommendations
 - **Wait for completion before proceeding**
 
@@ -54,11 +54,23 @@ When a user requests an ingest pipeline for an integration and datastream, orche
 **Delegate to ingest_pipeline_generator sub-agent:**
 - Task: "Based on the following log analysis: [analysis from Step 1], generate an optimal ingest pipeline that extracts ALL values from the source logs. Requirements:
   1. Extract every field and value present in the raw logs, even if not immediately ECS-mappable
-  2. Preserve the original 'message' field in all cases - never remove it
-  3. Handle type conversions carefully: use conditional logic (e.g., 'if' statements) to avoid type mismatch errors when converting fields that may contain non-numeric strings like 'N/A'
-  4. For syslog-formatted logs, parse syslog headers to extract metadata like timestamp, hostname, process name, and PID
-  5. Include a single pipeline-level 'on_failure' handler covering the whole pipeline; never attach 'on_failure' to individual processors
-  6. The pipeline will be validated automatically."
+  2. Preserve the original 'message' field in all cases - never remove it; if parsing is required, use 'copy_from' or process before removal to ensure the original is preserved
+  3. Handle type conversions defensively:
+     - Use conditional logic (e.g., 'if' statements) to check field existence and format before converting
+     - For numeric conversions, verify the field does not contain non-numeric strings like 'N/A', 'null', 'unknown', etc.
+     - Use 'ignore_failure: true' on all convert processors
+     - For comparison operations (>, <, >=, <=), ensure both operands are the same type by checking type first or using safe string comparisons
+  4. For syslog-formatted logs:
+     - Use grok or dissect to parse the syslog header FIRST
+     - Extract priority (for log.syslog.priority calculation), timestamp, hostname (observer.name), process name (event.provider or process.name), and PID (process.pid)
+     - Parse the syslog priority to derive log.syslog.facility and log.syslog.severity if present
+     - After syslog header parsing, parse the remaining message content according to its format (KV, CSV, JSON, etc.)
+  5. For nested JSON structures (especially with 'identity', 'claims', 'authorization' objects):
+     - Flatten deeply nested fields carefully
+     - Use dot notation to access nested properties (e.g., 'identity.claims.aud')
+     - Ensure all nested paths are extracted before attempting to use them
+  6. Include a single pipeline-level 'on_failure' handler covering the whole pipeline; never attach 'on_failure' to individual processors
+  7. The pipeline will be validated automatically."
 - Expected output: SUCCESS or FAILURE status
 - Note: The pipeline is stored in state automatically. Pipeline generator has its own validator - trust the result.
 - **Wait for completion before proceeding**
@@ -69,15 +81,27 @@ When a user requests an ingest pipeline for an integration and datastream, orche
 - Task: "Review these pipeline output snippets and provide comprehensive ECS (Elastic Common Schema) field mappings. Requirements:
   1. Map every field that has a clear ECS equivalent, prioritizing accuracy over coverage
   2. For each mapping, specify the original field name, target ECS field, and mapping type (rename, copy, or convert with data type)
-  3. Provide a separate section listing appropriate values for 'event.kind', 'event.category', 'event.type', and 'event.outcome' based on the log content and context
+  3. Provide a separate section listing appropriate values for 'event.kind', 'event.category', 'event.type', and 'event.outcome' based on the log content and context:
+     - 'event.kind': Use 'event' for logs, 'metric' for metrics, 'alert' for alerts, etc. from the allowed ECS values
+     - 'event.category': Choose from allowed values like 'network', 'web', 'authentication', 'file', 'process', 'configuration', etc.
+     - 'event.type': Select from allowed values like 'access', 'connection', 'start', 'end', 'info', 'error', 'denied', 'allowed', etc.
+     - 'event.outcome': Use 'success', 'failure', or 'unknown' based on log content
   4. Identify and explicitly list any fields that should map to 'related.ip', 'related.hash', 'related.hosts', or 'related.user', including the source field names
-  5. For metadata fields, recommend mappings to 'observer.vendor', 'observer.name', 'event.provider', and similar fields when identifiable
-  6. Be conservative with constrained vocabulary fields (event.kind, event.category, event.type, event.outcome, network.direction, network.transport, http.request.method) - only suggest values from the allowed ECS value sets"
+  5. For metadata fields, recommend mappings to 'observer.vendor', 'observer.type', 'observer.name', 'event.provider', and similar fields when identifiable:
+     - 'observer.vendor': The product vendor (e.g., 'Netgate' for pfSense, 'Microsoft' for Azure, 'Stormshield' for Stormshield)
+     - 'observer.type': The type of observer (e.g., 'firewall', 'proxy', 'ids', 'vpn')
+     - 'observer.name': The hostname or name of the specific observer instance
+     - 'event.provider': The logging component or service name (e.g., 'filterlog', 'AccessLog')
+  6. For syslog-based logs, ensure mappings for 'log.syslog.priority', 'log.syslog.facility', 'log.syslog.severity', and 'process.pid' if these were extracted
+  7. Be conservative with constrained vocabulary fields - only suggest values from the allowed ECS value sets
+  8. Recommend normalization of protocol names to lowercase (e.g., 'HTTPS' → 'https', 'HTTP' → 'http')
+  9. For TLS version fields, recommend complete version strings (e.g., 'TLS' → 'TLS 1.2' if version can be determined)"
 - Expected output:
   1. Markdown table with field mappings (original_field → ecs_field, mapping_type, notes)
   2. Separate section with recommended values for 'event.kind', 'event.category', 'event.type', and 'event.outcome'
-  3. Statement identifying whether 'related.ip', 'related.hash', 'related.hosts', or 'related.user' mappings are recommended, listing the original field(s) for each
-  4. Any additional ECS fields that can be derived or populated from context
+  3. Separate section for metadata field recommendations ('observer.vendor', 'observer.type', 'observer.name', 'event.provider')
+  4. Statement identifying whether 'related.ip', 'related.hash', 'related.hosts', or 'related.user' mappings are recommended, listing the original field(s) for each
+  5. Any additional ECS fields that can be derived or populated from context
 - **Wait for completion before proceeding**
 
 ### Step 4: Append ECS Rename Processors
@@ -88,7 +112,8 @@ When a user requests an ingest pipeline for an integration and datastream, orche
   2. Only append new rename processors for field-to-ECS mappings
   3. Use 'ignore_missing: true' on all rename processors to prevent errors if source fields are absent
   4. Never rename or remove the 'message' field
-  5. Validate the final pipeline after appending."
+  5. For fields that should be copied rather than moved, use 'copy' instead of 'rename' to preserve the original
+  6. Validate the final pipeline after appending."
 - Expected output: SUCCESS or FAILURE status
 - Note: The updated pipeline remains in state
 - **Wait for completion before proceeding**
@@ -97,12 +122,19 @@ When a user requests an ingest pipeline for an integration and datastream, orche
 **Delegate to ingest_pipeline_generator sub-agent:**
 - First, call the \`fetch_current_pipeline\` tool again and include the returned pipeline in your task description.
 - Task: "Here is the validated pipeline currently stored in state: [output from fetch_current_pipeline]. Add 'set' and 'append' processors at the VERY END of this pipeline to populate ECS fields based on the text_to_ecs recommendations. Requirements:
-  1. For 'event.kind', 'event.category', 'event.type', and 'event.outcome', use 'set' processors for single values or 'append' processors for multiple values
-  2. For 'related.ip', 'related.hash', 'related.hosts', and 'related.user', use 'append' processors with 'allow_duplicates: false' and 'if' conditionals to check field existence
-  3. Add one processor per value when multiple values exist for the same ECS field
-  4. Use 'ignore_failure: true' to prevent errors from missing source fields
-  5. Do not alter existing processors
-  6. Validate the final pipeline after appending."
+  1. For 'event.kind', use a 'set' processor with the recommended value
+  2. For 'event.category', use 'append' processors if multiple values are recommended, otherwise use 'set'
+  3. For 'event.type', use 'append' processors if multiple values are recommended, otherwise use 'set'
+  4. For 'event.outcome', use a 'set' processor with the recommended value
+  5. For metadata fields ('observer.vendor', 'observer.type', 'observer.name', 'event.provider'), use 'set' processors with appropriate values based on the integration and context
+  6. For 'related.ip', 'related.hash', 'related.hosts', and 'related.user', use 'append' processors with:
+     - 'allow_duplicates: false'
+     - 'if' conditionals to check source field existence (e.g., 'if': 'ctx.source?.ip != null')
+     - Source field path from text_to_ecs recommendations
+  7. For protocol normalization, use 'lowercase' processors on fields like 'network.protocol', 'network.transport'
+  8. Add 'ignore_failure: true' where appropriate to prevent processing errors
+  9. Do not alter existing processors
+  10. Validate the final pipeline after appending."
 - Expected output: SUCCESS or FAILURE status
 - Note: The updated pipeline remains in state
 - **Wait for completion before proceeding**
@@ -122,9 +154,11 @@ If any step fails, report:
 5. **Wait for responses** - Never proceed without confirmation from previous step
 6. **Maximize extraction** - Extract ALL values from source logs, even if not ECS-mapped
 7. **Preserve message field** - Never remove or overwrite the original 'message' field
-8. **Error prevention** - Use conditional logic and ignore_missing/ignore_failure flags to handle edge cases
-9. **ECS accuracy** - Map to ECS only when appropriate; prioritize correctness over coverage
-10. **Type safety** - Handle type conversions carefully to avoid processing errors
+8. **Error prevention** - Use defensive programming with conditional logic, type checks, ignore_missing, and ignore_failure flags
+9. **ECS accuracy** - Map to ECS only when appropriate; prioritize correctness over coverage; use correct values for constrained vocabulary fields
+10. **Type safety** - Handle type conversions carefully with validation and safe comparison operations
+11. **Syslog parsing priority** - Always parse syslog headers first to extract metadata fields before processing message content
+12. **Metadata completeness** - Ensure observer and event metadata fields are populated from context and log content
 
 ## Important Notes
 - The pipeline generator includes validation automatically - trust its SUCCESS/FAILURE response
@@ -132,7 +166,11 @@ If any step fails, report:
 - ECS mappings should be practical and meaningful, not forced
 - Each sub-agent has specialized tools and knowledge for its task
 - Extracting all source values is critical even if they remain in vendor-specific fields
-- Processing errors should be minimized through defensive pipeline construction`;
+- Processing errors should be minimized through defensive pipeline construction
+- Type conversion errors are a common failure mode - always validate types before operations
+- Syslog metadata (priority, hostname, process, PID) must be extracted for syslog-formatted logs
+- Constrained ECS vocabulary fields must use valid values from allowed sets
+- Protocol and version fields should be normalized to standard formats`;
 
 export const LOG_ANALYZER_PROMPT = `# Log Format Analyzer
 
