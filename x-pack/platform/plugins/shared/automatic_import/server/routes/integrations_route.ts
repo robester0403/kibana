@@ -23,6 +23,7 @@ import {
   CreateAutoImportIntegrationRequestBody,
   DeleteAutoImportIntegrationRequestParams,
   DownloadAutoImportIntegrationRequestParams,
+  DownloadAutoImportIntegrationRequestQuery,
   GetAutoImportIntegrationRequestParams,
 } from '../../common';
 import { buildAutomaticImportResponse } from './utils';
@@ -250,8 +251,7 @@ const approveIntegrationRoute = (
       },
       withAvailability(async (context, request, response) => {
         try {
-          const { automaticImportService, getCurrentUser, reportTelemetryEvent } =
-            await context.automaticImport;
+          const { automaticImportService, getCurrentUser } = await context.automaticImport;
           const authenticatedUser = await getCurrentUser();
 
           const { integration_id: integrationId } = request.params;
@@ -263,23 +263,6 @@ const approveIntegrationRoute = (
             version,
             categories,
           });
-
-          try {
-            const integration = await automaticImportService.getIntegrationById(integrationId);
-            const dataStreams = await automaticImportService.getAllDataStreams(integrationId);
-
-            dataStreams.forEach((ds) => {
-              reportTelemetryEvent(AutomaticImportTelemetryEventType.IntegrationInstalled, {
-                sessionId: request.headers['x-session-id'] || 'unknown',
-                integrationName: integration.title,
-                version,
-                dataStreamCount: dataStreams.length,
-                dataStreamName: ds.title,
-              });
-            });
-          } catch (telemetryError) {
-            logger.warn(`Failed to report telemetry: ${telemetryError}`);
-          }
 
           return response.ok({ body: { message: 'Integration approved successfully' } });
         } catch (err) {
@@ -368,18 +351,38 @@ const downloadIntegrationRoute = (
         validate: {
           request: {
             params: buildRouteValidationWithZod(DownloadAutoImportIntegrationRequestParams),
+            query: buildRouteValidationWithZod(DownloadAutoImportIntegrationRequestQuery),
           },
         },
       },
       withAvailability(async (context, request, response) => {
         try {
-          const automaticImport = await context.automaticImport;
-          const automaticImportService = automaticImport.automaticImportService;
+          const { automaticImportService, reportTelemetryEvent, fieldsMetadataClient } =
+            await context.automaticImport;
           const { integration_id: integrationId } = request.params;
           const { buffer, packageName } = await automaticImportService.buildIntegrationPackage(
             integrationId,
-            automaticImport.fieldsMetadataClient
+            fieldsMetadataClient
           );
+
+          if (request.query.intent === 'install') {
+            try {
+              const integration = await automaticImportService.getIntegrationById(integrationId);
+              const dataStreams = await automaticImportService.getAllDataStreams(integrationId);
+
+              dataStreams.forEach((ds) => {
+                reportTelemetryEvent(AutomaticImportTelemetryEventType.IntegrationInstalled, {
+                  sessionId: (request.headers['x-session-id'] as string) || 'unknown',
+                  integrationName: integration.title,
+                  version: integration.version ?? '',
+                  dataStreamCount: dataStreams.length,
+                  dataStreamName: ds.title,
+                });
+              });
+            } catch (telemetryError) {
+              logger.warn(`Failed to report install telemetry: ${telemetryError}`);
+            }
+          }
 
           return response.ok({
             body: buffer,
